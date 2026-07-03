@@ -41,7 +41,7 @@ def handler(event: dict, context) -> dict:
         if method == 'GET':
             cur.execute(
                 "SELECT id, equipment, reason, room, building, status, taken_by, author, created_at "
-                "FROM tickets ORDER BY id DESC"
+                "FROM tickets WHERE is_demo = FALSE ORDER BY id DESC"
             )
             tickets = [_row_to_ticket(r) for r in cur.fetchall()]
             return {'statusCode': 200, 'headers': jheaders, 'body': json.dumps({'tickets': tickets})}

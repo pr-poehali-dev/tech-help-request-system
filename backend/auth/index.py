@@ -65,8 +65,9 @@ def handler(event: dict, context) -> dict:
                     'body': json.dumps({'error': 'Логин уже занят'}),
                 }
             cur.execute(
-                "INSERT INTO users (full_name, login, password, role) VALUES (%s, %s, %s, 'student') RETURNING id",
-                (full_name, login, password),
+                "INSERT INTO users (full_name, login, password, password_visible, role) "
+                "VALUES (%s, %s, %s, %s, 'student') RETURNING id",
+                (full_name, login, password, password),
             )
             new_id = cur.fetchone()[0]
             conn.commit()
@@ -74,6 +75,35 @@ def handler(event: dict, context) -> dict:
                 'statusCode': 200,
                 'headers': {**cors, 'Content-Type': 'application/json'},
                 'body': json.dumps({'id': new_id, 'full_name': full_name, 'login': login}),
+            }
+
+        if method == 'POST' and action == 'update_profile':
+            user_id = body.get('id')
+            full_name = (body.get('full_name') or '').strip()
+            password = body.get('password') or ''
+            if not user_id or not full_name or not password:
+                return {
+                    'statusCode': 400,
+                    'headers': {**cors, 'Content-Type': 'application/json'},
+                    'body': json.dumps({'error': 'Заполните имя и пароль'}),
+                }
+            cur.execute(
+                "UPDATE users SET full_name = %s, password = %s, password_visible = %s "
+                "WHERE id = %s RETURNING id, full_name, role",
+                (full_name, password, password, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return {
+                    'statusCode': 404,
+                    'headers': {**cors, 'Content-Type': 'application/json'},
+                    'body': json.dumps({'error': 'Пользователь не найден'}),
+                }
+            conn.commit()
+            return {
+                'statusCode': 200,
+                'headers': {**cors, 'Content-Type': 'application/json'},
+                'body': json.dumps({'user': {'id': row[0], 'name': row[1], 'role': row[2]}}),
             }
 
         if method == 'GET':

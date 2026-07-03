@@ -21,6 +21,7 @@ import {
   DialogTrigger,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 
 type Role = 'master' | 'admin' | 'teacher';
 type Status = 'Оформлено' | 'В работе' | 'Выполнено';
@@ -55,22 +56,18 @@ const STATUS_STYLES: Record<Status, string> = {
   Выполнено: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
 };
 
-const DEFAULT_LOGINS: Record<Role, string> = {
-  master: 'master',
-  admin: 'admin',
-  teacher: 'teacher',
-};
-
 const Index = () => {
   const [user, setUser] = useState<User | null>(null);
-  const [loginRole, setLoginRole] = useState<Role>('master');
-  const [credentials, setCredentials] = useState({ login: 'master', password: 'demo' });
+  const [credentials, setCredentials] = useState({ login: '', password: '' });
+  const [showPassword, setShowPassword] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [statusFilter, setStatusFilter] = useState<'Все' | Status>('Все');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [form, setForm] = useState({ equipment: '', reason: '', room: '', building: 'Корпус А' });
-  const [student, setStudent] = useState({ full_name: '', login: '' });
+  const [student, setStudent] = useState({ full_name: '', login: '', password: '' });
+  const [profile, setProfile] = useState({ full_name: '', password: '' });
 
   const newCount = useMemo(
     () => tickets.filter((t) => t.status === 'Оформлено').length,
@@ -95,6 +92,7 @@ const Index = () => {
   useEffect(() => {
     if (!user) return;
     loadTickets();
+    setProfile({ full_name: user.name, password: '' });
     if (user.role === 'master') {
       const interval = setInterval(loadTickets, 8000);
       return () => clearInterval(interval);
@@ -163,7 +161,7 @@ const Index = () => {
   const completeTicket = (id: number) => updateStatus(id, 'Выполнено');
 
   const registerStudent = async () => {
-    if (!student.full_name || !student.login) return;
+    if (!student.full_name || !student.login || !student.password) return;
     try {
       const res = await fetch(AUTH_URL, {
         method: 'POST',
@@ -175,8 +173,29 @@ const Index = () => {
         toast({ title: data.error ?? 'Ошибка', variant: 'destructive' });
         return;
       }
-      setStudent({ full_name: '', login: '' });
+      setStudent({ full_name: '', login: '', password: '' });
       toast({ title: `Студент ${data.full_name} зарегистрирован` });
+    } catch {
+      toast({ title: 'Сервер недоступен', variant: 'destructive' });
+    }
+  };
+
+  const updateProfile = async () => {
+    if (!user?.id || !profile.full_name || !profile.password) return;
+    try {
+      const res = await fetch(AUTH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_profile', id: user.id, ...profile }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast({ title: data.error ?? 'Ошибка', variant: 'destructive' });
+        return;
+      }
+      setUser(data.user);
+      setProfileOpen(false);
+      toast({ title: 'Профиль обновлён' });
     } catch {
       toast({ title: 'Сервер недоступен', variant: 'destructive' });
     }
@@ -195,31 +214,10 @@ const Index = () => {
 
           <h1 className="text-2xl font-semibold tracking-tight mb-1.5">Вход в систему</h1>
           <p className="text-sm text-muted-foreground mb-8">
-            Выберите роль для входа. Студентов регистрирует администратор.
+            Введите логин и пароль. Студентов регистрирует администратор.
           </p>
 
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Роль
-              </Label>
-              <Select
-                value={loginRole}
-                onValueChange={(v) => {
-                  setLoginRole(v as Role);
-                  setCredentials({ login: DEFAULT_LOGINS[v as Role], password: 'demo' });
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="master">Мастер</SelectItem>
-                  <SelectItem value="admin">Администратор</SelectItem>
-                  <SelectItem value="teacher">Преподаватель</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
             <div className="space-y-2">
               <Label htmlFor="login" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Логин
@@ -237,15 +235,25 @@ const Index = () => {
               </Label>
               <Input
                 id="pass"
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 placeholder="••••••••"
                 value={credentials.password}
                 onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
                 onKeyDown={(e) => e.key === 'Enter' && doLogin()}
               />
             </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="show-pass"
+                checked={showPassword}
+                onCheckedChange={(v) => setShowPassword(v === true)}
+              />
+              <Label htmlFor="show-pass" className="text-sm font-normal text-muted-foreground cursor-pointer">
+                Показать пароль
+              </Label>
+            </div>
             <Button className="w-full mt-2" onClick={doLogin} disabled={loggingIn}>
-              {loggingIn ? 'Вход...' : `Войти как ${ROLE_LABELS[loginRole].toLowerCase()}`}
+              {loggingIn ? 'Вход...' : 'Вход'}
               {!loggingIn && <Icon name="ArrowRight" size={16} className="ml-1" />}
             </Button>
           </div>
@@ -281,7 +289,10 @@ const Index = () => {
                 </span>
               </div>
             )}
-            <div className="flex items-center gap-2.5">
+            <div
+              className={`flex items-center gap-2.5 ${isAdmin ? 'cursor-pointer' : ''}`}
+              onClick={() => isAdmin && setProfileOpen(true)}
+            >
               <div className="text-right hidden sm:block">
                 <div className="text-sm font-medium leading-tight">{user.name}</div>
                 <div className="text-xs text-muted-foreground">{ROLE_LABELS[user.role]}</div>
@@ -296,6 +307,40 @@ const Index = () => {
           </div>
         </div>
       </header>
+
+      {isAdmin && (
+        <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Профиль администратора</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>Фамилия Имя</Label>
+                <Input
+                  value={profile.full_name}
+                  onChange={(e) => setProfile({ ...profile, full_name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Новый пароль</Label>
+                <Input
+                  type="password"
+                  placeholder="Введите новый пароль"
+                  value={profile.password}
+                  onChange={(e) => setProfile({ ...profile, password: e.target.value })}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setProfileOpen(false)}>
+                Отмена
+              </Button>
+              <Button onClick={updateProfile}>Сохранить</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       <main className="container py-10 max-w-5xl">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8 animate-fade-in">
@@ -476,7 +521,7 @@ const Index = () => {
             <p className="text-sm text-muted-foreground mb-5">
               Администратор регистрирует студентов для входа в систему.
             </p>
-            <div className="grid sm:grid-cols-3 gap-3">
+            <div className="grid sm:grid-cols-4 gap-3">
               <Input
                 placeholder="Фамилия Имя"
                 value={student.full_name}
@@ -486,6 +531,11 @@ const Index = () => {
                 placeholder="Логин студента"
                 value={student.login}
                 onChange={(e) => setStudent({ ...student, login: e.target.value })}
+              />
+              <Input
+                placeholder="Пароль студента"
+                value={student.password}
+                onChange={(e) => setStudent({ ...student, password: e.target.value })}
               />
               <Button onClick={registerStudent}>
                 <Icon name="UserPlus" size={16} className="mr-1" />
