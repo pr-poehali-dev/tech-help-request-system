@@ -1,5 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import Icon from '@/components/ui/icon';
+import { toast } from '@/hooks/use-toast';
+import { AUTH_URL, TICKETS_URL } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -36,6 +38,7 @@ interface Ticket {
 }
 
 interface User {
+  id?: number;
   name: string;
   role: Role;
 }
@@ -46,61 +49,28 @@ const ROLE_LABELS: Record<Role, string> = {
   teacher: 'Преподаватель',
 };
 
-const DEMO_USERS: Record<string, User> = {
-  master: { name: 'Иванов Сергей', role: 'master' },
-  admin: { name: 'Петрова Ольга', role: 'admin' },
-  teacher: { name: 'Смирнов Андрей', role: 'teacher' },
-};
-
 const STATUS_STYLES: Record<Status, string> = {
   Оформлено: 'bg-muted text-muted-foreground',
   'В работе': 'bg-accent/10 text-accent border border-accent/30',
   Выполнено: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
 };
 
-const INITIAL_TICKETS: Ticket[] = [
-  {
-    id: 1042,
-    equipment: 'Проектор Epson EB-X05',
-    reason: 'Не включается, индикатор мигает красным',
-    room: '312',
-    building: 'Корпус А',
-    status: 'В работе',
-    takenBy: 'Иванов Сергей',
-    author: 'Смирнов Андрей',
-    createdAt: '03.07, 09:14',
-  },
-  {
-    id: 1041,
-    equipment: 'Компьютер Dell OptiPlex',
-    reason: 'Не загружается ОС, чёрный экран',
-    room: '204',
-    building: 'Корпус Б',
-    status: 'Оформлено',
-    takenBy: null,
-    author: 'Смирнов Андрей',
-    createdAt: '03.07, 08:50',
-  },
-  {
-    id: 1039,
-    equipment: 'Интерактивная доска SMART',
-    reason: 'Не реагирует на касания в левом углу',
-    room: '118',
-    building: 'Корпус А',
-    status: 'Выполнено',
-    takenBy: 'Петрова Ольга',
-    author: 'Смирнов Андрей',
-    createdAt: '02.07, 15:30',
-  },
-];
+const DEFAULT_LOGINS: Record<Role, string> = {
+  master: 'master',
+  admin: 'admin',
+  teacher: 'teacher',
+};
 
 const Index = () => {
   const [user, setUser] = useState<User | null>(null);
   const [loginRole, setLoginRole] = useState<Role>('master');
-  const [tickets, setTickets] = useState<Ticket[]>(INITIAL_TICKETS);
+  const [credentials, setCredentials] = useState({ login: 'master', password: 'demo' });
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
   const [statusFilter, setStatusFilter] = useState<'Все' | Status>('Все');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ equipment: '', reason: '', room: '', building: 'Корпус А' });
+  const [student, setStudent] = useState({ full_name: '', login: '' });
 
   const newCount = useMemo(
     () => tickets.filter((t) => t.status === 'Оформлено').length,
@@ -112,36 +82,104 @@ const Index = () => {
     [tickets, statusFilter],
   );
 
-  const createTicket = () => {
+  const loadTickets = useCallback(async () => {
+    try {
+      const res = await fetch(TICKETS_URL);
+      const data = await res.json();
+      setTickets(data.tickets ?? []);
+    } catch {
+      toast({ title: 'Не удалось загрузить заявки', variant: 'destructive' });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    loadTickets();
+    if (user.role === 'master') {
+      const interval = setInterval(loadTickets, 8000);
+      return () => clearInterval(interval);
+    }
+  }, [user, loadTickets]);
+
+  const doLogin = async () => {
+    setLoggingIn(true);
+    try {
+      const res = await fetch(AUTH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', ...credentials }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast({ title: data.error ?? 'Ошибка входа', variant: 'destructive' });
+        return;
+      }
+      setUser(data.user);
+    } catch {
+      toast({ title: 'Сервер недоступен', variant: 'destructive' });
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  const createTicket = async () => {
     if (!form.equipment || !form.reason || !form.room) return;
-    const ticket: Ticket = {
-      id: Math.max(...tickets.map((t) => t.id)) + 1,
-      equipment: form.equipment,
-      reason: form.reason,
-      room: form.room,
-      building: form.building,
-      status: 'Оформлено',
-      takenBy: null,
-      author: user?.name ?? 'Гость',
-      createdAt: 'сейчас',
-    };
-    setTickets([ticket, ...tickets]);
-    setForm({ equipment: '', reason: '', room: '', building: 'Корпус А' });
-    setDialogOpen(false);
+    try {
+      const res = await fetch(TICKETS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, author: user?.name ?? 'Гость' }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast({ title: data.error ?? 'Ошибка', variant: 'destructive' });
+        return;
+      }
+      setTickets((prev) => [data.ticket, ...prev]);
+      setForm({ equipment: '', reason: '', room: '', building: 'Корпус А' });
+      setDialogOpen(false);
+      toast({ title: 'Заявка создана' });
+    } catch {
+      toast({ title: 'Сервер недоступен', variant: 'destructive' });
+    }
   };
 
-  const takeTicket = (id: number) => {
-    setTickets((prev) =>
-      prev.map((t) =>
-        t.id === id ? { ...t, status: 'В работе', takenBy: user?.name ?? null } : t,
-      ),
-    );
+  const updateStatus = async (id: number, status: Status, takenBy?: string) => {
+    try {
+      const res = await fetch(TICKETS_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status, takenBy }),
+      });
+      const data = await res.json();
+      if (!res.ok) return;
+      setTickets((prev) => prev.map((t) => (t.id === id ? data.ticket : t)));
+    } catch {
+      toast({ title: 'Сервер недоступен', variant: 'destructive' });
+    }
   };
 
-  const completeTicket = (id: number) => {
-    setTickets((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, status: 'Выполнено' } : t)),
-    );
+  const takeTicket = (id: number) => updateStatus(id, 'В работе', user?.name ?? undefined);
+  const completeTicket = (id: number) => updateStatus(id, 'Выполнено');
+
+  const registerStudent = async () => {
+    if (!student.full_name || !student.login) return;
+    try {
+      const res = await fetch(AUTH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'register', ...student }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast({ title: data.error ?? 'Ошибка', variant: 'destructive' });
+        return;
+      }
+      setStudent({ full_name: '', login: '' });
+      toast({ title: `Студент ${data.full_name} зарегистрирован` });
+    } catch {
+      toast({ title: 'Сервер недоступен', variant: 'destructive' });
+    }
   };
 
   if (!user) {
@@ -165,7 +203,13 @@ const Index = () => {
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Роль
               </Label>
-              <Select value={loginRole} onValueChange={(v) => setLoginRole(v as Role)}>
+              <Select
+                value={loginRole}
+                onValueChange={(v) => {
+                  setLoginRole(v as Role);
+                  setCredentials({ login: DEFAULT_LOGINS[v as Role], password: 'demo' });
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -180,17 +224,29 @@ const Index = () => {
               <Label htmlFor="login" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Логин
               </Label>
-              <Input id="login" placeholder="Введите логин" defaultValue={DEMO_USERS[loginRole].name} />
+              <Input
+                id="login"
+                placeholder="Введите логин"
+                value={credentials.login}
+                onChange={(e) => setCredentials({ ...credentials, login: e.target.value })}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="pass" className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Пароль
               </Label>
-              <Input id="pass" type="password" placeholder="••••••••" defaultValue="demo" />
+              <Input
+                id="pass"
+                type="password"
+                placeholder="••••••••"
+                value={credentials.password}
+                onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
+                onKeyDown={(e) => e.key === 'Enter' && doLogin()}
+              />
             </div>
-            <Button className="w-full mt-2" onClick={() => setUser(DEMO_USERS[loginRole])}>
-              Войти как {ROLE_LABELS[loginRole].toLowerCase()}
-              <Icon name="ArrowRight" size={16} className="ml-1" />
+            <Button className="w-full mt-2" onClick={doLogin} disabled={loggingIn}>
+              {loggingIn ? 'Вход...' : `Войти как ${ROLE_LABELS[loginRole].toLowerCase()}`}
+              {!loggingIn && <Icon name="ArrowRight" size={16} className="ml-1" />}
             </Button>
           </div>
         </div>
@@ -421,9 +477,17 @@ const Index = () => {
               Администратор регистрирует студентов для входа в систему.
             </p>
             <div className="grid sm:grid-cols-3 gap-3">
-              <Input placeholder="Фамилия Имя" />
-              <Input placeholder="Логин студента" />
-              <Button>
+              <Input
+                placeholder="Фамилия Имя"
+                value={student.full_name}
+                onChange={(e) => setStudent({ ...student, full_name: e.target.value })}
+              />
+              <Input
+                placeholder="Логин студента"
+                value={student.login}
+                onChange={(e) => setStudent({ ...student, login: e.target.value })}
+              />
+              <Button onClick={registerStudent}>
                 <Icon name="UserPlus" size={16} className="mr-1" />
                 Зарегистрировать
               </Button>

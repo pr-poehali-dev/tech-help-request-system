@@ -1,0 +1,28 @@
+{
+  "tests": [
+    {
+      "name": "Успешный вход мастера",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "login", "login": "master", "password": "demo"},
+      "expectedStatus": 200,
+      "expectedBody": {"user": {"role": "master"}},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Неверный пароль",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "login", "login": "master", "password": "wrong"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Список студентов",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 200,
+      "expectedBody": {"students": []},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

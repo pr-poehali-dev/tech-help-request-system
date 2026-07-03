@@ -1,0 +1,28 @@
+{
+  "tests": [
+    {
+      "name": "Список заявок",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 200,
+      "expectedBody": {"tickets": []},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Создание заявки",
+      "method": "POST",
+      "path": "/",
+      "body": {"equipment": "Ноутбук HP", "reason": "Не заряжается", "room": "101", "building": "Корпус А", "author": "Смирнов Андрей"},
+      "expectedStatus": 200,
+      "expectedBody": {"ticket": {"status": "Оформлено"}},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Ошибка при пустых полях",
+      "method": "POST",
+      "path": "/",
+      "body": {"equipment": "", "reason": "", "room": ""},
+      "expectedStatus": 400
+    }
+  ]
+}
